@@ -408,7 +408,6 @@ export function activate(context: vscode.ExtensionContext) {
             published: new Date(vuln.published),
             modified: new Date(vuln.modified),
             aliases: vuln.aliases,
-            affectedVersions: [], // Add empty array since it's optional
           });
           vulnerabilities.set(vuln.modulePath, moduleVulns);
 
@@ -453,7 +452,6 @@ export function activate(context: vscode.ExtensionContext) {
                 published: new Date(vuln.published),
                 modified: new Date(vuln.modified),
                 aliases: vuln.aliases,
-                affectedVersions: [], // Add empty array since it's optional
               },
               locations: Array.from(locationMap.values()),
             });
@@ -782,6 +780,15 @@ async function generateReport(
             }
             parts.push(`- Published: ${vuln.published.toLocaleDateString()}`);
             parts.push(`- Modified: ${vuln.modified.toLocaleDateString()}`);
+            
+            // Add fix information if available
+            if (vuln.affected && vuln.affected.length > 0) {
+              const fixInfo = vuln.affected[0].ranges?.[0]?.events?.find(e => e.fixed);
+              if (fixInfo) {
+                parts.push(`- Fixed in version: ${fixInfo.fixed}`);
+              }
+            }
+            
             parts.push("\n" + vuln.details + "\n");
           });
         }

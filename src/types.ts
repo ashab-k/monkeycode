@@ -12,7 +12,20 @@ export interface Vulnerability {
     published: Date;
     modified: Date;
     aliases: string[];
-    affectedVersions?: string[]; // Make this optional since we don't always have it
+    affected?: Array<{
+        package: {
+            name: string;
+            ecosystem: string;
+            purl: string;
+        };
+        ranges: Array<{
+            type: string;
+            events: Array<{
+                introduced?: string;
+                fixed?: string;
+            }>;
+        }>;
+    }>;
 }
 
 export interface OSVVulnerability {
