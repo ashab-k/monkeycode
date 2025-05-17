@@ -782,8 +782,9 @@ async function generateReport(
             parts.push(`- Modified: ${vuln.modified.toLocaleDateString()}`);
             
             // Add fix information if available
-            if (vuln.affected && vuln.affected.length > 0) {
-              const fixInfo = vuln.affected[0].ranges?.[0]?.events?.find(e => e.fixed);
+            const vulnWithAffected = vuln as any;
+            if (vulnWithAffected.affected && vulnWithAffected.affected.length > 0) {
+              const fixInfo = vulnWithAffected.affected[0].ranges?.[0]?.events?.find((e: any) => e.fixed);
               if (fixInfo) {
                 parts.push(`- Fixed in version: ${fixInfo.fixed}`);
               }
@@ -849,7 +850,7 @@ async function generateReport(
         }))
       );
 
-      jsonReport.vulnerabilities.push({
+      const vulnerability = {
         id: generateHash(`${modulePath}@${module.version}:${vuln.id}`),
         modulePath,
         moduleVersion: module.version,
@@ -861,7 +862,14 @@ async function generateReport(
         modified: vuln.modified.toISOString(),
         aliases: vuln.aliases,
         usages: usageDetails,
-      });
+      };
+
+      // Add affected information if available
+      if (vuln.affected) {
+        (vulnerability as any).affected = vuln.affected;
+      }
+
+      jsonReport.vulnerabilities.push(vulnerability);
     });
   });
 
@@ -874,6 +882,56 @@ async function generateReport(
 async function getGoModHash(uri: vscode.Uri): Promise<string> {
   const content = await vscode.workspace.fs.readFile(uri);
   return crypto.createHash("sha256").update(content).digest("hex");
+}
+
+async function sendReportToApi(report: ScanReport): Promise<void> {
+  try {
+    const apiUrl = vscode.workspace
+      .getConfiguration("monkeycode")
+      .get("apiUrl", "http://localhost:4000");
+    console.log("Sending report to API:", apiUrl);
+
+    const response = await axios.post(`${apiUrl}/api/scan-reports`, report);
+    console.log("API response:", response.data);
+
+    if (response.status === 201) {
+      const scanId = response.data.scanId || report.scanId;
+      
+      // Show completion message first
+      vscode.window.showInformationMessage(
+        `Scan complete! Report stored with ID: ${scanId}`,
+        { modal: false }
+      );
+
+      // Then show the view option separately
+      const viewOnWeb = "View on Web";
+      const action = await vscode.window.showInformationMessage(
+        `View the scan report in your browser?`,
+        { modal: false },
+        viewOnWeb
+      );
+      
+      if (action === viewOnWeb) {
+        const webUrl = `http://localhost:3000/scan/${scanId}`;
+        vscode.env.openExternal(vscode.Uri.parse(webUrl));
+      }
+    }
+  } catch (error) {
+    console.error("Error sending report to API:", error);
+    if (axios.isAxiosError(error)) {
+      vscode.window.showErrorMessage(
+        `Failed to store scan report: ${
+          error.response?.data?.error || error.message
+        }`
+      );
+    } else {
+      vscode.window.showErrorMessage(
+        `Failed to store scan report: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
 }
 
 // Add function to generate markdown from cached report
@@ -964,61 +1022,21 @@ function generateReportFromCache(report: ScanReport): string {
         `- Published: ${new Date(vuln.published).toLocaleDateString()}`
       );
       parts.push(`- Modified: ${new Date(vuln.modified).toLocaleDateString()}`);
+      
+      // Add fix information if available
+      const vulnWithAffected = vuln as any;
+      if (vulnWithAffected.affected && vulnWithAffected.affected.length > 0) {
+        const fixInfo = vulnWithAffected.affected[0].ranges?.[0]?.events?.find((e: any) => e.fixed);
+        if (fixInfo) {
+          parts.push(`- Fixed in version: ${fixInfo.fixed}`);
+        }
+      }
+      
       parts.push("\n" + vuln.details + "\n");
     });
   }
 
   return parts.join("\n");
-}
-
-async function sendReportToApi(report: ScanReport): Promise<void> {
-  try {
-    const apiUrl = vscode.workspace
-      .getConfiguration("monkeycode")
-      .get("apiUrl", "http://localhost:4000");
-    console.log("Sending report to API:", apiUrl);
-
-    const response = await axios.post(`${apiUrl}/api/scan-reports`, report);
-    console.log("API response:", response.data);
-
-    if (response.status === 201) {
-      const scanId = response.data.scanId || report.scanId;
-      
-      // Show completion message first
-      vscode.window.showInformationMessage(
-        `Scan complete! Report stored with ID: ${scanId}`,
-        { modal: false }
-      );
-
-      // Then show the view option separately
-      const viewOnWeb = "View on Web";
-      const action = await vscode.window.showInformationMessage(
-        `View the scan report in your browser?`,
-        { modal: false },
-        viewOnWeb
-      );
-      
-      if (action === viewOnWeb) {
-        const webUrl = `http://localhost:3000/scan/${scanId}`;
-        vscode.env.openExternal(vscode.Uri.parse(webUrl));
-      }
-    }
-  } catch (error) {
-    console.error("Error sending report to API:", error);
-    if (axios.isAxiosError(error)) {
-      vscode.window.showErrorMessage(
-        `Failed to store scan report: ${
-          error.response?.data?.error || error.message
-        }`
-      );
-    } else {
-      vscode.window.showErrorMessage(
-        `Failed to store scan report: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-  }
 }
 
 export function deactivate() {

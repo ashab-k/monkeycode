@@ -31,6 +31,21 @@ const scanReportSchema = new mongoose_1.default.Schema({
             published: { type: String, required: true },
             modified: { type: String, required: true },
             aliases: [String],
+            affected: [{
+                    package: {
+                        name: { type: String, required: true },
+                        ecosystem: { type: String, required: true }
+                    },
+                    ranges: [{
+                            type: { type: String, required: true },
+                            events: [{
+                                    introduced: { type: String },
+                                    fixed: { type: String },
+                                    lastAffected: { type: String },
+                                    limit: { type: String }
+                                }]
+                        }]
+                }],
             usages: [{
                     id: { type: String, required: true },
                     file: { type: String, required: true },

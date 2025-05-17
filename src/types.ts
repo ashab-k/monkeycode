@@ -113,34 +113,53 @@ export interface ScanReport {
     highVulnerabilities: number;
     mediumVulnerabilities: number;
     lowVulnerabilities: number;
-    totalDependencies: number;
-    vulnerableDependencies: number;
+    totalUsages: number;
   };
   dependencyTree: Array<{
-    name: string;
+    id: string;
+    path: string;
     version: string;
-    vulnerabilities: string[];
-    dependencies?: Array<{
-      name: string;
+    indirect: boolean;
+    depth: number;
+    dependencies: Array<{
+      id: string;
+      path: string;
       version: string;
-      vulnerabilities: string[];
+      indirect: boolean;
     }>;
   }>;
   vulnerabilities: Array<{
     id: string;
-    title: string;
-    description: string;
+    modulePath: string;
+    moduleVersion: string;
+    vulnerabilityId: string;
     severity: string;
-    cvssScore: number;
-    affectedVersions: string[];
-    fixedVersions: string[];
-    references: string[];
+    summary: string;
+    details: string;
+    published: string;
+    modified: string;
+    aliases: string[];
+    affected?: Array<{
+      package: {
+        name: string;
+        ecosystem: string;
+        purl: string;
+      };
+      ranges: Array<{
+        type: string;
+        events: Array<{
+          introduced?: string;
+          fixed?: string;
+        }>;
+      }>;
+    }>;
     usages: Array<{
+      id: string;
       file: string;
       line: number;
       column: number;
-      length: number;
       type: string;
+      details: string;
     }>;
   }>;
 } 
