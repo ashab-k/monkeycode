@@ -50,6 +50,13 @@ interface ScanReport {
   }>;
 }
 
+interface GoModCache {
+  hash: string;
+  content: string;
+  timestamp: string;
+  report: ScanReport;
+}
+
 function generateHash(input: string): string {
   return crypto
     .createHash("sha256")
@@ -106,8 +113,15 @@ export function activate(context: vscode.ExtensionContext) {
   // Command to scan dependencies and generate report
   let scanCommand = vscode.commands.registerCommand(
     "monkeycode.scanDependencies",
-    async () => {
+    async (forceRescan: boolean = false) => {
       try {
+        console.log("Scan command called with forceRescan:", forceRescan);
+        if (forceRescan) {
+          console.log("Force rescan was requested - this could be from:");
+          console.log("1. Explicit force rescan command");
+          console.log("2. go.mod file change");
+          console.log("3. Manual trigger with force=true parameter");
+        }
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (!workspaceFolders) {
           vscode.window.showErrorMessage("No workspace folder open");
@@ -118,6 +132,63 @@ export function activate(context: vscode.ExtensionContext) {
         if (!goModUri) {
           vscode.window.showErrorMessage("No go.mod file found in workspace");
           return;
+        }
+
+        // Check cache if not forcing rescan
+        if (!forceRescan) {
+          console.log("Checking cache...");
+          const currentHash = await getGoModHash(goModUri);
+          console.log("Current go.mod hash:", currentHash);
+          
+          const cachedData = context.workspaceState.get("goModCache") as GoModCache | undefined;
+          console.log("Cached data found:", !!cachedData);
+          if (cachedData) {
+            console.log("Cached hash:", cachedData.hash);
+            console.log("Cache timestamp:", cachedData.timestamp);
+          }
+
+          if (cachedData && cachedData.hash === currentHash) {
+            console.log("Cache hit! Using cached results");
+            
+            // Show the cached report
+            const document = await vscode.workspace.openTextDocument({
+              content: generateReportFromCache(cachedData.report),
+              language: "markdown",
+            });
+            await vscode.window.showTextDocument(document);
+
+            // Update the JSON report in workspace state
+            context.workspaceState.update("lastScanJsonReport", cachedData.report);
+
+            // Save JSON report to file if configured
+            const config = vscode.workspace.getConfiguration("monkeycode");
+            if (config.get("saveJsonReport")) {
+              const jsonPath = vscode.Uri.joinPath(
+                workspaceFolders[0].uri,
+                `.monkeycode/reports/scan_${cachedData.report.scanId}.json`
+              );
+              
+              // Ensure directory exists
+              await vscode.workspace.fs.createDirectory(
+                vscode.Uri.joinPath(workspaceFolders[0].uri, ".monkeycode/reports")
+              );
+              
+              // Write JSON file
+              await vscode.workspace.fs.writeFile(
+                jsonPath,
+                Buffer.from(JSON.stringify(cachedData.report, null, 2))
+              );
+            }
+
+            vscode.window.showInformationMessage(
+              `Using cached scan results from ${new Date(cachedData.timestamp).toLocaleString()}`
+            );
+            return;
+          } else {
+            console.log("Cache miss - performing new scan");
+          }
+        } else {
+          console.log("Force rescan requested - ignoring cache");
         }
 
         const progressOptions: vscode.ProgressOptions = {
@@ -134,7 +205,6 @@ export function activate(context: vscode.ExtensionContext) {
           const { vulnerabilities, dependencyTree } =
             await VulnerabilityScanner.scanDependencies(modules);
 
-          // Scan codebase for vulnerable code usage
           progress.report({
             message: "Scanning codebase for vulnerable code...",
           });
@@ -149,6 +219,20 @@ export function activate(context: vscode.ExtensionContext) {
             dependencyTree,
             usages
           );
+
+          // Cache the results
+          console.log("Caching new scan results...");
+          const goModContent = await vscode.workspace.fs.readFile(goModUri);
+          const cache: GoModCache = {
+            hash: await getGoModHash(goModUri),
+            content: Buffer.from(goModContent).toString("utf8"),
+            timestamp: new Date().toISOString(),
+            report: report.json
+          };
+          console.log("New cache hash:", cache.hash);
+          console.log("New cache timestamp:", cache.timestamp);
+          context.workspaceState.update("goModCache", cache);
+          console.log("Cache updated in workspace state");
 
           // Store the JSON report in workspace state
           context.workspaceState.update("lastScanJsonReport", report.json);
@@ -170,7 +254,7 @@ export function activate(context: vscode.ExtensionContext) {
                 workspaceFolders[0].uri,
                 `.monkeycode/reports/scan_${report.json.scanId}.json`
               );
-
+              
               // Ensure directory exists
               await vscode.workspace.fs.createDirectory(
                 vscode.Uri.joinPath(
@@ -178,13 +262,13 @@ export function activate(context: vscode.ExtensionContext) {
                   ".monkeycode/reports"
                 )
               );
-
+              
               // Write JSON file
               await vscode.workspace.fs.writeFile(
                 jsonPath,
                 Buffer.from(JSON.stringify(report.json, null, 2))
               );
-
+              
               vscode.window.showInformationMessage(
                 `JSON report saved to ${vscode.workspace.asRelativePath(
                   jsonPath
@@ -192,15 +276,9 @@ export function activate(context: vscode.ExtensionContext) {
               );
             }
           }
-
-          // Show a message with a link to view the JSON in the Output panel
-          const outputChannel =
-            vscode.window.createOutputChannel("MonkeyCode Scan");
-          outputChannel.appendLine("=== Scan Report JSON ===");
-          outputChannel.appendLine(JSON.stringify(report.json, null, 2));
-          outputChannel.show();
         });
       } catch (error) {
+        console.error("Error in scan command:", error);
         vscode.window.showErrorMessage(
           `Error scanning dependencies: ${
             error instanceof Error ? error.message : String(error)
@@ -210,13 +288,24 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  // Add a command to force rescan
+  let forceRescanCommand = vscode.commands.registerCommand(
+    "monkeycode.forceRescanDependencies",
+    () => {
+      console.log("Force rescan command explicitly called");
+      vscode.commands.executeCommand("monkeycode.scanDependencies", true);
+    }
+  );
+
   // Command to show vulnerable code in the current file
   let showVulnerableCodeCommand = vscode.commands.registerCommand(
     "monkeycode.showVulnerableCode",
     async () => {
       try {
+        console.log("Show vulnerable code command called");
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
+          console.log("No active text editor");
           vscode.window.showInformationMessage(
             "Please open a Go file to show vulnerable code"
           );
@@ -224,6 +313,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         if (editor.document.languageId !== "go") {
+          console.log("Active file is not a Go file:", editor.document.languageId);
           vscode.window.showInformationMessage(
             "Please open a Go file to show vulnerable code"
           );
@@ -231,6 +321,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         // Clear any existing decorations first
+        console.log("Clearing existing decorations");
         editor.setDecorations(decorationType, []);
 
         console.log(
@@ -243,6 +334,7 @@ export function activate(context: vscode.ExtensionContext) {
         ) as ScanReport | undefined;
 
         if (!storedReport) {
+          console.log("No stored scan report found");
           vscode.window.showInformationMessage(
             'Please run "Scan Dependencies" first to get vulnerability information'
           );
@@ -254,13 +346,21 @@ export function activate(context: vscode.ExtensionContext) {
           timestamp: storedReport.timestamp,
           totalVulnerabilities: storedReport.summary.totalVulnerabilities,
           totalUsages: storedReport.summary.totalUsages,
+          vulnerabilities: storedReport.vulnerabilities.length
         });
 
         // Convert JSON report back to the format expected by CodeScanner
         const vulnerabilities = new Map<string, Vulnerability[]>();
         const usages: VulnerableUsage[] = [];
 
+        console.log("Converting stored report to scanner format");
         storedReport.vulnerabilities.forEach((vuln) => {
+          console.log("Processing vulnerability:", {
+            module: vuln.modulePath,
+            id: vuln.vulnerabilityId,
+            usages: vuln.usages.length
+          });
+          
           // Add to vulnerabilities map
           const moduleVulns = vulnerabilities.get(vuln.modulePath) || [];
           moduleVulns.push({
@@ -277,6 +377,29 @@ export function activate(context: vscode.ExtensionContext) {
 
           // Add to usages array
           if (vuln.usages.length > 0) {
+            // Group usages by file and line to combine multiple usages at the same location
+            const locationMap = new Map<string, CodeLocation>();
+            
+            vuln.usages.forEach(usage => {
+              const key = `${usage.file}:${usage.line}:${usage.column}`;
+              const existingLocation = locationMap.get(key);
+              
+              if (existingLocation) {
+                // Combine details if we have multiple usages at the same location
+                existingLocation.details = `${existingLocation.details}\n${usage.details}`;
+              } else {
+                // Create a new location with proper details and length
+                locationMap.set(key, {
+                  file: usage.file,
+                  line: usage.line,
+                  column: usage.column,
+                  length: usage.type === 'import' ? vuln.modulePath.length : 20, // Use module path length for imports, default length for others
+                  type: usage.type as "import" | "function" | "method",
+                  details: usage.details || `Uses vulnerable package ${vuln.modulePath} (${vuln.vulnerabilityId})`
+                });
+              }
+            });
+
             usages.push({
               module: {
                 path: vuln.modulePath,
@@ -293,14 +416,7 @@ export function activate(context: vscode.ExtensionContext) {
                 aliases: vuln.aliases,
                 affectedVersions: [], // Add empty array since it's optional
               },
-              locations: vuln.usages.map((usage) => ({
-                file: usage.file,
-                line: usage.line,
-                column: usage.column,
-                length: 0,
-                type: usage.type as "import" | "function" | "method",
-                details: usage.details,
-              })),
+              locations: Array.from(locationMap.values())
             });
           }
         });
@@ -326,6 +442,7 @@ export function activate(context: vscode.ExtensionContext) {
         });
 
         if (fileUsages.length === 0) {
+          console.log("No vulnerable code found in this file");
           vscode.window.showInformationMessage(
             "No vulnerable code found in this file"
           );
@@ -333,10 +450,12 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         // Create decorations for the current file
+        console.log("Creating decorations for file");
         const decorations = CodeScanner.createDecorations(
           fileUsages,
           editor.document.fileName
         );
+        
         console.log("Created decorations:", {
           count: decorations.length,
           decorations: decorations.map((d) => ({
@@ -363,8 +482,9 @@ export function activate(context: vscode.ExtensionContext) {
         });
 
         // Apply decorations to the current editor
+        console.log("Applying decorations to editor");
         editor.setDecorations(decorationType, decorations);
-        console.log("Applied decorations to editor");
+        console.log("Decorations applied successfully");
 
         // Show a message with the timestamp of the last scan
         const lastScanDate = new Date(storedReport.timestamp).toLocaleString();
@@ -384,12 +504,43 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Watch for go.mod changes if enabled
   const config = vscode.workspace.getConfiguration("monkeycode");
-  if (config.get("watchGoMod")) {
+  if (config.get("watchGoMod", false)) { // Default to false
+    console.log("Setting up go.mod file watcher...");
+    let lastContent: string | undefined;
+    let debounceTimer: NodeJS.Timeout | undefined;
+    
     const watcher = vscode.workspace.createFileSystemWatcher("**/go.mod");
-    watcher.onDidChange(() => {
-      vscode.commands.executeCommand("monkeycode.scanDependencies");
+    
+    watcher.onDidChange(async (uri) => {
+      console.log("go.mod file change detected:", uri.fsPath);
+      
+      // Read the current content
+      const content = await vscode.workspace.fs.readFile(uri);
+      const contentStr = Buffer.from(content).toString('utf8');
+      
+      // Only trigger if content actually changed
+      if (contentStr !== lastContent) {
+        console.log("go.mod content actually changed, scheduling rescan");
+        lastContent = contentStr;
+        
+        // Clear any existing timer
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+        
+        // Debounce the rescan for 1 second
+        debounceTimer = setTimeout(() => {
+          console.log("Triggering force rescan after debounce");
+          vscode.commands.executeCommand("monkeycode.forceRescanDependencies");
+        }, 1000);
+      } else {
+        console.log("go.mod file accessed but content unchanged, skipping rescan");
+      }
     });
+    
     context.subscriptions.push(watcher);
+  } else {
+    console.log("go.mod file watcher is disabled");
   }
 
   // Watch for Go file changes to clear decorations
@@ -422,6 +573,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     scanCommand,
+    forceRescanCommand,
     showVulnerableCodeCommand,
     goFileWatcher,
     editorChangeDisposable
@@ -615,6 +767,102 @@ function generateReport(
     markdown: parts.join("\n"),
     json: jsonReport,
   };
+}
+
+async function getGoModHash(uri: vscode.Uri): Promise<string> {
+  const content = await vscode.workspace.fs.readFile(uri);
+  return crypto
+    .createHash("sha256")
+    .update(content)
+    .digest("hex");
+}
+
+// Add function to generate markdown from cached report
+function generateReportFromCache(report: ScanReport): string {
+  const parts: string[] = [];
+
+  // Add header
+  parts.push("# Go Dependency Scan Report (Cached)\n");
+  parts.push(`Generated: ${new Date(report.timestamp).toLocaleString()}\n`);
+
+  // Add dependency tree
+  parts.push("## Dependency Tree\n");
+  parts.push("```\n");
+  report.dependencyTree.forEach(node => {
+    const indent = "  ".repeat(node.depth);
+    const indirect = node.indirect ? " (indirect)" : "";
+    parts.push(`${indent}${node.path}@${node.version}${indirect}`);
+  });
+  parts.push("```\n");
+
+  // Add vulnerability summary
+  parts.push("## Vulnerability Summary\n");
+  parts.push(`Total Vulnerabilities: ${report.summary.totalVulnerabilities}\n`);
+  parts.push(`- Critical: ${report.summary.criticalVulnerabilities}`);
+  parts.push(`- High: ${report.summary.highVulnerabilities}`);
+  parts.push(`- Medium: ${report.summary.mediumVulnerabilities}`);
+  parts.push(`- Low: ${report.summary.lowVulnerabilities}\n`);
+
+  // Add code usage summary
+  if (report.summary.totalUsages > 0) {
+    parts.push("## Vulnerable Code Usage\n");
+    parts.push(`Found ${report.summary.totalUsages} vulnerable packages in use:\n`);
+
+    // Group usages by file
+    const fileUsagesMap = new Map<string, Array<{
+      modulePath: string;
+      vulnerabilityId: string;
+      severity: string;
+      summary: string;
+      line: number;
+      details: string;
+    }>>();
+
+    report.vulnerabilities.forEach(vuln => {
+      vuln.usages.forEach(usage => {
+        const fileUsages = fileUsagesMap.get(usage.file) || [];
+        fileUsages.push({
+          modulePath: vuln.modulePath,
+          vulnerabilityId: vuln.vulnerabilityId,
+          severity: vuln.severity,
+          summary: vuln.summary,
+          line: usage.line,
+          details: usage.details
+        });
+        fileUsagesMap.set(usage.file, fileUsages);
+      });
+    });
+
+    // Add usage details by file
+    for (const [file, usages] of fileUsagesMap) {
+      const relativePath = vscode.workspace.asRelativePath(file);
+      parts.push(`### ${relativePath}\n`);
+      
+      usages.forEach(usage => {
+        parts.push(`- Line ${usage.line}: ${usage.details}`);
+        parts.push(`  - Severity: ${usage.severity}`);
+        parts.push(`  - ${usage.summary}\n`);
+      });
+    }
+  }
+
+  // Add detailed vulnerability information
+  if (report.summary.totalVulnerabilities > 0) {
+    parts.push("## Detailed Vulnerabilities\n");
+    report.vulnerabilities.forEach(vuln => {
+      parts.push(`### ${vuln.modulePath}@${vuln.moduleVersion}\n`);
+      parts.push(`#### ${vuln.severity.toUpperCase()}: ${vuln.summary}`);
+      parts.push(`- ID: ${vuln.vulnerabilityId}`);
+      if (vuln.aliases.length > 0) {
+        parts.push(`- Aliases: ${vuln.aliases.join(", ")}`);
+      }
+      parts.push(`- Published: ${new Date(vuln.published).toLocaleDateString()}`);
+      parts.push(`- Modified: ${new Date(vuln.modified).toLocaleDateString()}`);
+      parts.push("\n" + vuln.details + "\n");
+    });
+  }
+
+  return parts.join("\n");
 }
 
 export function deactivate() {
