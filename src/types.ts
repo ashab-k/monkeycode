@@ -1,16 +1,18 @@
 export interface GoModule {
     path: string;
     version: string;
-    indirect?: boolean;
+    indirect: boolean;
 }
 
 export interface Vulnerability {
     id: string;
-    package: string;
-    version: string;
-    severity: 'low' | 'medium' | 'high' | 'critical';
-    description: string;
-    fixedVersion?: string;
+    summary: string;
+    details: string;
+    aliases: string[];
+    severity: 'low' | 'medium' | 'high' | 'critical' | 'unknown';
+    published: Date;
+    modified: Date;
+    affectedVersions: any[]; // TODO: Type this more specifically
 }
 
 export interface TrustScore {
@@ -23,6 +25,13 @@ export interface TrustScore {
 
 export interface DependencyInfo {
     module: GoModule;
-    vulnerabilities?: Vulnerability[];
-    trustScore?: TrustScore;
+    vulnerabilities: Vulnerability[];
+    trustScore?: number;
+}
+
+export interface ScanResult {
+    timestamp: Date;
+    modules: DependencyInfo[];
+    totalVulnerabilities: number;
+    hasCriticalVulnerabilities: boolean;
 } 

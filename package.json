@@ -1,25 +1,24 @@
 {
   "name": "monkeycode",
   "displayName": "Go Dependency Threat Scanner",
-  "description": "Scans Go dependencies for security vulnerabilities and trust scores",
+  "description": "Scans Go dependencies for vulnerabilities and security issues",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Security",
-    "Programming Languages"
+    "Other",
+    "Security"
   ],
   "keywords": [
     "go",
+    "golang",
     "security",
     "vulnerability",
-    "dependencies",
-    "scanner"
+    "dependencies"
   ],
   "activationEvents": [
     "onLanguage:go",
-    "onCommand:monkeycode.scanDependencies",
     "workspaceContains:**/go.mod"
   ],
   "main": "./out/extension.js",
@@ -33,16 +32,10 @@
     "configuration": {
       "title": "Go Dependency Threat Scanner",
       "properties": {
-        "monkeycode.scanOnSave": {
+        "monkeycode.watchGoMod": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically scan dependencies when go.mod is saved"
-        },
-        "monkeycode.vulnerabilitySeverity": {
-          "type": "string",
-          "enum": ["error", "warning", "info"],
-          "default": "warning",
-          "description": "Severity level for vulnerability diagnostics"
+          "description": "Automatically scan dependencies when go.mod changes"
         }
       }
     }
@@ -64,7 +57,6 @@
     "typescript": "^5.3.2"
   },
   "dependencies": {
-    "axios": "^1.6.0",
-    "semver": "^7.5.4"
+    "axios": "^1.6.2"
   }
 }
