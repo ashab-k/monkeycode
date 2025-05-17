@@ -4,6 +4,7 @@ import { VulnerabilityScanner } from "./vulnerabilityScanner";
 import { CodeScanner, VulnerableUsage, CodeLocation } from "./codeScanner";
 import { GoModule, Vulnerability, DependencyTree } from "./types";
 import * as crypto from "crypto";
+import axios from "axios";
 
 let decorationType: vscode.TextEditorDecorationType;
 
@@ -219,6 +220,9 @@ export function activate(context: vscode.ExtensionContext) {
             dependencyTree,
             usages
           );
+
+          // Send report to API
+          await sendReportToApi(report.json);
 
           // Cache the results
           console.log("Caching new scan results...");
@@ -699,66 +703,59 @@ function generateReport(
 
   // Generate JSON report
   const jsonReport: ScanReport = {
-    scanId,
-    timestamp,
+    scanId: generateHash(Date.now().toString()),
+    timestamp: new Date().toISOString(),
     summary: {
       totalVulnerabilities: totalVulns,
       criticalVulnerabilities: criticalVulns,
       highVulnerabilities: highVulns,
       mediumVulnerabilities: mediumVulns,
       lowVulnerabilities: lowVulns,
-      totalUsages: usages.length,
+      totalUsages: usages.length
     },
-    dependencyTree: Array.from(dependencyTree.entries()).map(
-      ([path, node]) => ({
-        id: generateHash(`${path}@${node.module.version}`),
-        path,
-        version: node.module.version,
-        indirect: node.module.indirect,
-        depth: node.depth,
-      })
-    ),
-    vulnerabilities: [],
+    dependencyTree: Array.from(dependencyTree.entries()).map(([path, node]) => ({
+      id: generateHash(`${path}@${node.module.version}`),
+      path,
+      version: node.module.version,
+      indirect: node.module.indirect,
+      depth: node.depth
+    })),
+    vulnerabilities: []
   };
 
-  // Process vulnerabilities and their usages
+  // Process vulnerabilities to match exact format
   vulnerabilities.forEach((vulns, modulePath) => {
     const module = modules.find((m) => m.path === modulePath);
     if (!module) return;
 
     vulns.forEach((vuln) => {
-      const vulnId = generateHash(`${modulePath}@${module.version}:${vuln.id}`);
       const vulnUsages = usages.filter(
         (u) => u.module.path === modulePath && u.vulnerability.id === vuln.id
       );
 
       const usageDetails = vulnUsages.flatMap((usage) =>
         usage.locations.map((location) => ({
-          id: generateHash(
-            `${vulnId}:${location.file}:${location.line}:${location.column}`
-          ),
+          id: generateHash(`${vuln.id}:${location.file}:${location.line}:${location.column}`),
           file: location.file,
           line: location.line,
           column: location.column,
           type: location.type,
-          details: location.details,
+          details: location.details || `Uses vulnerable package ${modulePath} (${vuln.id})`
         }))
       );
 
       jsonReport.vulnerabilities.push({
-        id: vulnId,
+        id: generateHash(`${modulePath}@${module.version}:${vuln.id}`),
         modulePath,
         moduleVersion: module.version,
         vulnerabilityId: vuln.id,
-        severity: normalizeSeverity(
-          typeof vuln.severity === "string" ? vuln.severity : "unknown"
-        ),
+        severity: normalizeSeverity(vuln.severity),
         summary: vuln.summary,
         details: vuln.details,
         published: vuln.published.toISOString(),
         modified: vuln.modified.toISOString(),
         aliases: vuln.aliases,
-        usages: usageDetails,
+        usages: usageDetails
       });
     });
   });
@@ -863,6 +860,33 @@ function generateReportFromCache(report: ScanReport): string {
   }
 
   return parts.join("\n");
+}
+
+async function sendReportToApi(report: ScanReport): Promise<void> {
+  try {
+    const apiUrl = vscode.workspace.getConfiguration("monkeycode").get("apiUrl", "http://localhost:3000");
+    console.log("Sending report to API:", apiUrl);
+    
+    const response = await axios.post(`${apiUrl}/api/scan-reports`, report);
+    console.log("API response:", response.data);
+    
+    if (response.status === 201) {
+      vscode.window.showInformationMessage(
+        `Scan report stored successfully with ID: ${response.data.scanId}`
+      );
+    }
+  } catch (error) {
+    console.error("Error sending report to API:", error);
+    if (axios.isAxiosError(error)) {
+      vscode.window.showErrorMessage(
+        `Failed to store scan report: ${error.response?.data?.error || error.message}`
+      );
+    } else {
+      vscode.window.showErrorMessage(
+        `Failed to store scan report: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
 }
 
 export function deactivate() {

@@ -89,4 +89,45 @@ export interface DependencyNode {
     depth: number;
 }
 
-export type DependencyTree = Map<string, DependencyNode>; 
+export type DependencyTree = Map<string, DependencyNode>;
+
+export interface ScanReport {
+  scanId: string;
+  timestamp: string;
+  summary: {
+    totalVulnerabilities: number;
+    criticalVulnerabilities: number;
+    highVulnerabilities: number;
+    mediumVulnerabilities: number;
+    lowVulnerabilities: number;
+    totalDependencies: number;
+    vulnerableDependencies: number;
+  };
+  dependencyTree: Array<{
+    name: string;
+    version: string;
+    vulnerabilities: string[];
+    dependencies?: Array<{
+      name: string;
+      version: string;
+      vulnerabilities: string[];
+    }>;
+  }>;
+  vulnerabilities: Array<{
+    id: string;
+    title: string;
+    description: string;
+    severity: string;
+    cvssScore: number;
+    affectedVersions: string[];
+    fixedVersions: string[];
+    references: string[];
+    usages: Array<{
+      file: string;
+      line: number;
+      column: number;
+      length: number;
+      type: string;
+    }>;
+  }>;
+} 
