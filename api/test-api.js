@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const axios_1 = require("axios");
-const API_URL = 'http://localhost:3000';
+const API_URL = 'http://localhost:4000';
 async function testApi() {
     try {
         // Test data

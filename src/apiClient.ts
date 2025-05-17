@@ -4,7 +4,7 @@ import { ScanReport } from './types';
 export class ApiClient {
   private baseUrl: string;
 
-  constructor(baseUrl: string = 'http://localhost:3000') {
+  constructor(baseUrl: string = 'http://localhost:4000') {
     this.baseUrl = baseUrl;
   }
 

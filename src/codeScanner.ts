@@ -23,94 +23,81 @@ export class CodeScanner {
     vulnerableModules: Map<string, Vulnerability[]>
   ): Promise<VulnerableUsage[]> {
     console.log('Starting code scan in:', workspaceRoot);
-    console.log('Vulnerable modules to check:', Array.from(vulnerableModules.entries()).map(([path, vulns]) => 
-      `${path} (${vulns.length} vulnerabilities)`
-    ));
     
-    const usages = new Map<string, VulnerableUsage>(); // Use Map to deduplicate
+    const usages = new Map<string, VulnerableUsage>();
     const goFiles = await this.findGoFiles(workspaceRoot);
-    console.log('Found Go files:', goFiles);
+    console.log('Found', goFiles.length, 'Go files to scan');
 
-    for (const file of goFiles) {
-      console.log('\nScanning file:', file);
-      const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(file));
-      const content = Buffer.from(fileContent).toString('utf8');
-      
-      // Skip test files for now (we can add them later if needed)
-      if (file.endsWith('_test.go')) {
-        console.log('Skipping test file');
-        continue;
-      }
+    // Process files in batches to avoid blocking
+    const batchSize = 10;
+    for (let i = 0; i < goFiles.length; i += batchSize) {
+      const batch = goFiles.slice(i, i + batchSize);
+      await Promise.all(batch.map(async (file) => {
+        try {
+          // Skip test files
+          if (file.endsWith('_test.go')) {
+            return;
+          }
 
-      // Find all imports and their locations
-      const imports = this.findImports(content, file);
-      console.log('Found imports:', Array.from(imports.keys()));
-      
-      // Check each import against vulnerable modules
-      for (const [importPath, locations] of imports) {
-        const vulns = vulnerableModules.get(importPath);
-        if (vulns) {
-          console.log('Found vulnerable import:', importPath);
-          for (const vuln of vulns) {
-            console.log('  - Vulnerability:', vuln.id, vuln.severity);
-            const key = `${importPath}:${vuln.id}`;
-            const existingUsage = usages.get(key);
-            
-            if (existingUsage) {
-              console.log('    Adding to existing usage');
-              existingUsage.locations.push(...locations);
-            } else {
-              console.log('    Creating new usage');
-              usages.set(key, {
-                module: { path: importPath, version: '', indirect: false },
-                vulnerability: vuln,
-                locations: locations
-              });
+          const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(file));
+          const content = Buffer.from(fileContent).toString('utf8');
+          
+          // Find all imports and their locations
+          const imports = this.findImports(content, file);
+          
+          // Check each import against vulnerable modules
+          for (const [importPath, locations] of imports) {
+            const vulns = vulnerableModules.get(importPath);
+            if (vulns) {
+              for (const vuln of vulns) {
+                const key = `${importPath}:${vuln.id}`;
+                const existingUsage = usages.get(key);
+                
+                if (existingUsage) {
+                  existingUsage.locations.push(...locations);
+                } else {
+                  usages.set(key, {
+                    module: { path: importPath, version: '', indirect: false },
+                    vulnerability: vuln,
+                    locations: locations
+                  });
+                }
+              }
             }
           }
-        } else {
-          // Log when we find an import that's not in vulnerable modules
-          console.log('Import not found in vulnerable modules:', importPath);
-        }
-      }
 
-      // Find function calls to vulnerable packages
-      const functionCalls = this.findFunctionCalls(content, file, imports);
-      console.log('Found function calls:', Array.from(functionCalls.keys()));
-      
-      for (const [importPath, calls] of functionCalls) {
-        const vulns = vulnerableModules.get(importPath);
-        if (vulns) {
-          console.log('Found vulnerable function calls in:', importPath);
-          for (const vuln of vulns) {
-            console.log('  - Vulnerability:', vuln.id, vuln.severity);
-            const key = `${importPath}:${vuln.id}`;
-            const existingUsage = usages.get(key);
-            
-            if (existingUsage) {
-              console.log('    Adding to existing usage');
-              existingUsage.locations.push(...calls);
-            } else {
-              console.log('    Creating new usage');
-              usages.set(key, {
-                module: { path: importPath, version: '', indirect: false },
-                vulnerability: vuln,
-                locations: calls
-              });
+          // Find function calls to vulnerable packages
+          const functionCalls = this.findFunctionCalls(content, file, imports);
+          
+          for (const [importPath, calls] of functionCalls) {
+            const vulns = vulnerableModules.get(importPath);
+            if (vulns) {
+              for (const vuln of vulns) {
+                const key = `${importPath}:${vuln.id}`;
+                const existingUsage = usages.get(key);
+                
+                if (existingUsage) {
+                  existingUsage.locations.push(...calls);
+                } else {
+                  usages.set(key, {
+                    module: { path: importPath, version: '', indirect: false },
+                    vulnerability: vuln,
+                    locations: calls
+                  });
+                }
+              }
             }
           }
-        } else {
-          // Log when we find function calls to a package that's not in vulnerable modules
-          console.log('Function calls to package not found in vulnerable modules:', importPath);
+        } catch (error) {
+          console.error(`Error scanning file ${file}:`, error);
         }
-      }
+      }));
     }
 
     const results = Array.from(usages.values());
     console.log('\nScan complete. Found usages:', results.length);
     results.forEach(usage => {
       console.log(`- ${usage.module.path}: ${usage.vulnerability.id} (${usage.locations.length} locations)`);
-      // Log unique files where this vulnerability was found
       const uniqueFiles = new Set(usage.locations.map(l => l.file));
       console.log(`  Found in ${uniqueFiles.size} files:`, Array.from(uniqueFiles));
     });

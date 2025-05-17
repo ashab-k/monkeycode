@@ -140,8 +140,10 @@ export function activate(context: vscode.ExtensionContext) {
           console.log("Checking cache...");
           const currentHash = await getGoModHash(goModUri);
           console.log("Current go.mod hash:", currentHash);
-          
-          const cachedData = context.workspaceState.get("goModCache") as GoModCache | undefined;
+
+          const cachedData = context.workspaceState.get("goModCache") as
+            | GoModCache
+            | undefined;
           console.log("Cached data found:", !!cachedData);
           if (cachedData) {
             console.log("Cached hash:", cachedData.hash);
@@ -150,7 +152,7 @@ export function activate(context: vscode.ExtensionContext) {
 
           if (cachedData && cachedData.hash === currentHash) {
             console.log("Cache hit! Using cached results");
-            
+
             // Show the cached report
             const document = await vscode.workspace.openTextDocument({
               content: generateReportFromCache(cachedData.report),
@@ -159,7 +161,10 @@ export function activate(context: vscode.ExtensionContext) {
             await vscode.window.showTextDocument(document);
 
             // Update the JSON report in workspace state
-            context.workspaceState.update("lastScanJsonReport", cachedData.report);
+            context.workspaceState.update(
+              "lastScanJsonReport",
+              cachedData.report
+            );
 
             // Save JSON report to file if configured
             const config = vscode.workspace.getConfiguration("monkeycode");
@@ -168,12 +173,15 @@ export function activate(context: vscode.ExtensionContext) {
                 workspaceFolders[0].uri,
                 `.monkeycode/reports/scan_${cachedData.report.scanId}.json`
               );
-              
+
               // Ensure directory exists
               await vscode.workspace.fs.createDirectory(
-                vscode.Uri.joinPath(workspaceFolders[0].uri, ".monkeycode/reports")
+                vscode.Uri.joinPath(
+                  workspaceFolders[0].uri,
+                  ".monkeycode/reports"
+                )
               );
-              
+
               // Write JSON file
               await vscode.workspace.fs.writeFile(
                 jsonPath,
@@ -182,7 +190,9 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             vscode.window.showInformationMessage(
-              `Using cached scan results from ${new Date(cachedData.timestamp).toLocaleString()}`
+              `Using cached scan results from ${new Date(
+                cachedData.timestamp
+              ).toLocaleString()}`
             );
             return;
           } else {
@@ -195,10 +205,15 @@ export function activate(context: vscode.ExtensionContext) {
         const progressOptions: vscode.ProgressOptions = {
           location: vscode.ProgressLocation.Notification,
           title: "Scanning Go dependencies...",
-          cancellable: false,
+          cancellable: true,
         };
 
-        await vscode.window.withProgress(progressOptions, async (progress) => {
+        await vscode.window.withProgress(progressOptions, async (progress, token) => {
+          token.onCancellationRequested(() => {
+            console.log("User cancelled the scan");
+            return;
+          });
+
           progress.report({ message: "Parsing go.mod file..." });
           const modules = await GoModParser.parseGoMod(goModUri);
 
@@ -208,12 +223,17 @@ export function activate(context: vscode.ExtensionContext) {
 
           progress.report({
             message: "Scanning codebase for vulnerable code...",
+            increment: 0
           });
           const usages = await CodeScanner.scanCodebase(
             workspaceFolders[0].uri.fsPath,
             vulnerabilities
           );
 
+          progress.report({
+            message: "Generating report...",
+            increment: 0
+          });
           const report = generateReport(
             modules,
             vulnerabilities,
@@ -221,6 +241,10 @@ export function activate(context: vscode.ExtensionContext) {
             usages
           );
 
+          progress.report({
+            message: "Sending report to API...",
+            increment: 0
+          });
           // Send report to API
           await sendReportToApi(report.json);
 
@@ -231,7 +255,7 @@ export function activate(context: vscode.ExtensionContext) {
             hash: await getGoModHash(goModUri),
             content: Buffer.from(goModContent).toString("utf8"),
             timestamp: new Date().toISOString(),
-            report: report.json
+            report: report.json,
           };
           console.log("New cache hash:", cache.hash);
           console.log("New cache timestamp:", cache.timestamp);
@@ -258,7 +282,7 @@ export function activate(context: vscode.ExtensionContext) {
                 workspaceFolders[0].uri,
                 `.monkeycode/reports/scan_${report.json.scanId}.json`
               );
-              
+
               // Ensure directory exists
               await vscode.workspace.fs.createDirectory(
                 vscode.Uri.joinPath(
@@ -266,13 +290,13 @@ export function activate(context: vscode.ExtensionContext) {
                   ".monkeycode/reports"
                 )
               );
-              
+
               // Write JSON file
               await vscode.workspace.fs.writeFile(
                 jsonPath,
                 Buffer.from(JSON.stringify(report.json, null, 2))
               );
-              
+
               vscode.window.showInformationMessage(
                 `JSON report saved to ${vscode.workspace.asRelativePath(
                   jsonPath
@@ -317,7 +341,10 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         if (editor.document.languageId !== "go") {
-          console.log("Active file is not a Go file:", editor.document.languageId);
+          console.log(
+            "Active file is not a Go file:",
+            editor.document.languageId
+          );
           vscode.window.showInformationMessage(
             "Please open a Go file to show vulnerable code"
           );
@@ -350,7 +377,7 @@ export function activate(context: vscode.ExtensionContext) {
           timestamp: storedReport.timestamp,
           totalVulnerabilities: storedReport.summary.totalVulnerabilities,
           totalUsages: storedReport.summary.totalUsages,
-          vulnerabilities: storedReport.vulnerabilities.length
+          vulnerabilities: storedReport.vulnerabilities.length,
         });
 
         // Convert JSON report back to the format expected by CodeScanner
@@ -362,9 +389,9 @@ export function activate(context: vscode.ExtensionContext) {
           console.log("Processing vulnerability:", {
             module: vuln.modulePath,
             id: vuln.vulnerabilityId,
-            usages: vuln.usages.length
+            usages: vuln.usages.length,
           });
-          
+
           // Add to vulnerabilities map
           const moduleVulns = vulnerabilities.get(vuln.modulePath) || [];
           moduleVulns.push({
@@ -383,11 +410,11 @@ export function activate(context: vscode.ExtensionContext) {
           if (vuln.usages.length > 0) {
             // Group usages by file and line to combine multiple usages at the same location
             const locationMap = new Map<string, CodeLocation>();
-            
-            vuln.usages.forEach(usage => {
+
+            vuln.usages.forEach((usage) => {
               const key = `${usage.file}:${usage.line}:${usage.column}`;
               const existingLocation = locationMap.get(key);
-              
+
               if (existingLocation) {
                 // Combine details if we have multiple usages at the same location
                 existingLocation.details = `${existingLocation.details}\n${usage.details}`;
@@ -397,9 +424,11 @@ export function activate(context: vscode.ExtensionContext) {
                   file: usage.file,
                   line: usage.line,
                   column: usage.column,
-                  length: usage.type === 'import' ? vuln.modulePath.length : 20, // Use module path length for imports, default length for others
+                  length: usage.type === "import" ? vuln.modulePath.length : 20, // Use module path length for imports, default length for others
                   type: usage.type as "import" | "function" | "method",
-                  details: usage.details || `Uses vulnerable package ${vuln.modulePath} (${vuln.vulnerabilityId})`
+                  details:
+                    usage.details ||
+                    `Uses vulnerable package ${vuln.modulePath} (${vuln.vulnerabilityId})`,
                 });
               }
             });
@@ -420,7 +449,7 @@ export function activate(context: vscode.ExtensionContext) {
                 aliases: vuln.aliases,
                 affectedVersions: [], // Add empty array since it's optional
               },
-              locations: Array.from(locationMap.values())
+              locations: Array.from(locationMap.values()),
             });
           }
         });
@@ -459,7 +488,7 @@ export function activate(context: vscode.ExtensionContext) {
           fileUsages,
           editor.document.fileName
         );
-        
+
         console.log("Created decorations:", {
           count: decorations.length,
           decorations: decorations.map((d) => ({
@@ -508,40 +537,43 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Watch for go.mod changes if enabled
   const config = vscode.workspace.getConfiguration("monkeycode");
-  if (config.get("watchGoMod", false)) { // Default to false
+  if (config.get("watchGoMod", false)) {
+    // Default to false
     console.log("Setting up go.mod file watcher...");
     let lastContent: string | undefined;
     let debounceTimer: NodeJS.Timeout | undefined;
-    
+
     const watcher = vscode.workspace.createFileSystemWatcher("**/go.mod");
-    
+
     watcher.onDidChange(async (uri) => {
       console.log("go.mod file change detected:", uri.fsPath);
-      
+
       // Read the current content
       const content = await vscode.workspace.fs.readFile(uri);
-      const contentStr = Buffer.from(content).toString('utf8');
-      
+      const contentStr = Buffer.from(content).toString("utf8");
+
       // Only trigger if content actually changed
       if (contentStr !== lastContent) {
         console.log("go.mod content actually changed, scheduling rescan");
         lastContent = contentStr;
-        
+
         // Clear any existing timer
         if (debounceTimer) {
           clearTimeout(debounceTimer);
         }
-        
+
         // Debounce the rescan for 1 second
         debounceTimer = setTimeout(() => {
           console.log("Triggering force rescan after debounce");
           vscode.commands.executeCommand("monkeycode.forceRescanDependencies");
         }, 1000);
       } else {
-        console.log("go.mod file accessed but content unchanged, skipping rescan");
+        console.log(
+          "go.mod file accessed but content unchanged, skipping rescan"
+        );
       }
     });
-    
+
     context.subscriptions.push(watcher);
   } else {
     console.log("go.mod file watcher is disabled");
@@ -711,16 +743,18 @@ function generateReport(
       highVulnerabilities: highVulns,
       mediumVulnerabilities: mediumVulns,
       lowVulnerabilities: lowVulns,
-      totalUsages: usages.length
+      totalUsages: usages.length,
     },
-    dependencyTree: Array.from(dependencyTree.entries()).map(([path, node]) => ({
-      id: generateHash(`${path}@${node.module.version}`),
-      path,
-      version: node.module.version,
-      indirect: node.module.indirect,
-      depth: node.depth
-    })),
-    vulnerabilities: []
+    dependencyTree: Array.from(dependencyTree.entries()).map(
+      ([path, node]) => ({
+        id: generateHash(`${path}@${node.module.version}`),
+        path,
+        version: node.module.version,
+        indirect: node.module.indirect,
+        depth: node.depth,
+      })
+    ),
+    vulnerabilities: [],
   };
 
   // Process vulnerabilities to match exact format
@@ -735,12 +769,16 @@ function generateReport(
 
       const usageDetails = vulnUsages.flatMap((usage) =>
         usage.locations.map((location) => ({
-          id: generateHash(`${vuln.id}:${location.file}:${location.line}:${location.column}`),
+          id: generateHash(
+            `${vuln.id}:${location.file}:${location.line}:${location.column}`
+          ),
           file: location.file,
           line: location.line,
           column: location.column,
           type: location.type,
-          details: location.details || `Uses vulnerable package ${modulePath} (${vuln.id})`
+          details:
+            location.details ||
+            `Uses vulnerable package ${modulePath} (${vuln.id})`,
         }))
       );
 
@@ -755,7 +793,7 @@ function generateReport(
         published: vuln.published.toISOString(),
         modified: vuln.modified.toISOString(),
         aliases: vuln.aliases,
-        usages: usageDetails
+        usages: usageDetails,
       });
     });
   });
@@ -768,10 +806,7 @@ function generateReport(
 
 async function getGoModHash(uri: vscode.Uri): Promise<string> {
   const content = await vscode.workspace.fs.readFile(uri);
-  return crypto
-    .createHash("sha256")
-    .update(content)
-    .digest("hex");
+  return crypto.createHash("sha256").update(content).digest("hex");
 }
 
 // Add function to generate markdown from cached report
@@ -785,7 +820,7 @@ function generateReportFromCache(report: ScanReport): string {
   // Add dependency tree
   parts.push("## Dependency Tree\n");
   parts.push("```\n");
-  report.dependencyTree.forEach(node => {
+  report.dependencyTree.forEach((node) => {
     const indent = "  ".repeat(node.depth);
     const indirect = node.indirect ? " (indirect)" : "";
     parts.push(`${indent}${node.path}@${node.version}${indirect}`);
@@ -803,20 +838,25 @@ function generateReportFromCache(report: ScanReport): string {
   // Add code usage summary
   if (report.summary.totalUsages > 0) {
     parts.push("## Vulnerable Code Usage\n");
-    parts.push(`Found ${report.summary.totalUsages} vulnerable packages in use:\n`);
+    parts.push(
+      `Found ${report.summary.totalUsages} vulnerable packages in use:\n`
+    );
 
     // Group usages by file
-    const fileUsagesMap = new Map<string, Array<{
-      modulePath: string;
-      vulnerabilityId: string;
-      severity: string;
-      summary: string;
-      line: number;
-      details: string;
-    }>>();
+    const fileUsagesMap = new Map<
+      string,
+      Array<{
+        modulePath: string;
+        vulnerabilityId: string;
+        severity: string;
+        summary: string;
+        line: number;
+        details: string;
+      }>
+    >();
 
-    report.vulnerabilities.forEach(vuln => {
-      vuln.usages.forEach(usage => {
+    report.vulnerabilities.forEach((vuln) => {
+      vuln.usages.forEach((usage) => {
         const fileUsages = fileUsagesMap.get(usage.file) || [];
         fileUsages.push({
           modulePath: vuln.modulePath,
@@ -824,7 +864,7 @@ function generateReportFromCache(report: ScanReport): string {
           severity: vuln.severity,
           summary: vuln.summary,
           line: usage.line,
-          details: usage.details
+          details: usage.details,
         });
         fileUsagesMap.set(usage.file, fileUsages);
       });
@@ -834,8 +874,8 @@ function generateReportFromCache(report: ScanReport): string {
     for (const [file, usages] of fileUsagesMap) {
       const relativePath = vscode.workspace.asRelativePath(file);
       parts.push(`### ${relativePath}\n`);
-      
-      usages.forEach(usage => {
+
+      usages.forEach((usage) => {
         parts.push(`- Line ${usage.line}: ${usage.details}`);
         parts.push(`  - Severity: ${usage.severity}`);
         parts.push(`  - ${usage.summary}\n`);
@@ -846,14 +886,16 @@ function generateReportFromCache(report: ScanReport): string {
   // Add detailed vulnerability information
   if (report.summary.totalVulnerabilities > 0) {
     parts.push("## Detailed Vulnerabilities\n");
-    report.vulnerabilities.forEach(vuln => {
+    report.vulnerabilities.forEach((vuln) => {
       parts.push(`### ${vuln.modulePath}@${vuln.moduleVersion}\n`);
       parts.push(`#### ${vuln.severity.toUpperCase()}: ${vuln.summary}`);
       parts.push(`- ID: ${vuln.vulnerabilityId}`);
       if (vuln.aliases.length > 0) {
         parts.push(`- Aliases: ${vuln.aliases.join(", ")}`);
       }
-      parts.push(`- Published: ${new Date(vuln.published).toLocaleDateString()}`);
+      parts.push(
+        `- Published: ${new Date(vuln.published).toLocaleDateString()}`
+      );
       parts.push(`- Modified: ${new Date(vuln.modified).toLocaleDateString()}`);
       parts.push("\n" + vuln.details + "\n");
     });
@@ -864,26 +906,49 @@ function generateReportFromCache(report: ScanReport): string {
 
 async function sendReportToApi(report: ScanReport): Promise<void> {
   try {
-    const apiUrl = vscode.workspace.getConfiguration("monkeycode").get("apiUrl", "http://localhost:3000");
+    const apiUrl = vscode.workspace
+      .getConfiguration("monkeycode")
+      .get("apiUrl", "http://localhost:4000");
     console.log("Sending report to API:", apiUrl);
-    
+
     const response = await axios.post(`${apiUrl}/api/scan-reports`, report);
     console.log("API response:", response.data);
-    
+
     if (response.status === 201) {
+      const scanId = response.data.scanId || report.scanId;
+      
+      // Show completion message first
       vscode.window.showInformationMessage(
-        `Scan report stored successfully with ID: ${response.data.scanId}`
+        `Scan complete! Report stored with ID: ${scanId}`,
+        { modal: false }
       );
+
+      // Then show the view option separately
+      const viewOnWeb = "View on Web";
+      const action = await vscode.window.showInformationMessage(
+        `View the scan report in your browser?`,
+        { modal: false },
+        viewOnWeb
+      );
+      
+      if (action === viewOnWeb) {
+        const webUrl = `http://localhost:3000/scan/${scanId}`;
+        vscode.env.openExternal(vscode.Uri.parse(webUrl));
+      }
     }
   } catch (error) {
     console.error("Error sending report to API:", error);
     if (axios.isAxiosError(error)) {
       vscode.window.showErrorMessage(
-        `Failed to store scan report: ${error.response?.data?.error || error.message}`
+        `Failed to store scan report: ${
+          error.response?.data?.error || error.message
+        }`
       );
     } else {
       vscode.window.showErrorMessage(
-        `Failed to store scan report: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to store scan report: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
     }
   }
