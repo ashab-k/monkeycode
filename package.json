@@ -1,18 +1,51 @@
 {
   "name": "monkeycode",
-  "displayName": "MonkeyCode",
-  "description": "A VS Code extension",
+  "displayName": "Go Dependency Threat Scanner",
+  "description": "Scans Go dependencies for security vulnerabilities and trust scores",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other"
+    "Security",
+    "Programming Languages"
   ],
-  "activationEvents": [],
+  "keywords": [
+    "go",
+    "security",
+    "vulnerability",
+    "dependencies",
+    "scanner"
+  ],
+  "activationEvents": [
+    "onLanguage:go",
+    "onCommand:monkeycode.scanDependencies",
+    "workspaceContains:**/go.mod"
+  ],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": []
+    "commands": [
+      {
+        "command": "monkeycode.scanDependencies",
+        "title": "Scan Go Dependencies for Vulnerabilities"
+      }
+    ],
+    "configuration": {
+      "title": "Go Dependency Threat Scanner",
+      "properties": {
+        "monkeycode.scanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan dependencies when go.mod is saved"
+        },
+        "monkeycode.vulnerabilitySeverity": {
+          "type": "string",
+          "enum": ["error", "warning", "info"],
+          "default": "warning",
+          "description": "Severity level for vulnerability diagnostics"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -29,5 +62,9 @@
     "@typescript-eslint/parser": "^6.13.1",
     "eslint": "^8.54.0",
     "typescript": "^5.3.2"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "semver": "^7.5.4"
   }
 }
