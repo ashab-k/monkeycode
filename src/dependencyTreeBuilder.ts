@@ -5,8 +5,51 @@ export class DependencyTreeBuilder {
   public static async buildTree(modules: GoModule[]): Promise<DependencyTree> {
     const tree: DependencyTree = new Map();
     
+    // Add root module
+    const rootModule: GoModule = {
+      path: "github.com/ashab-k/snippetbox",
+      version: "v1.0.0",
+      indirect: false
+    };
+    
+    // Add root module to tree
+    tree.set(rootModule.path, {
+      module: rootModule,
+      dependencies: modules.filter(m => !m.indirect), // Only direct dependencies at root level
+      depth: 0
+    });
+
+    // First, add all direct dependencies
     for (const module of modules) {
-      await this.buildDependencyTree(module, tree);
+      if (!module.indirect) {
+        tree.set(module.path, {
+          module,
+          dependencies: [],
+          depth: 1
+        });
+      }
+    }
+
+    // Then, add indirect dependencies and link them to their parents
+    for (const module of modules) {
+      if (module.indirect) {
+        // Find the parent module (the one that depends on this indirect dependency)
+        const parent = modules.find(m => !m.indirect && module.path.startsWith(m.path));
+        if (parent) {
+          // Add the indirect dependency to the tree
+          tree.set(module.path, {
+            module,
+            dependencies: [],
+            depth: 2
+          });
+
+          // Add it to its parent's dependencies
+          const parentNode = tree.get(parent.path);
+          if (parentNode) {
+            parentNode.dependencies.push(module);
+          }
+        }
+      }
     }
 
     return tree;

@@ -28,6 +28,12 @@ interface ScanReport {
     version: string;
     indirect: boolean;
     depth: number;
+    dependencies: Array<{
+      id: string;
+      path: string;
+      version: string;
+      indirect: boolean;
+    }>;
   }>;
   vulnerabilities: Array<{
     id: string;
@@ -234,7 +240,7 @@ export function activate(context: vscode.ExtensionContext) {
             message: "Generating report...",
             increment: 0
           });
-          const report = generateReport(
+          const report = await generateReport(
             modules,
             vulnerabilities,
             dependencyTree,
@@ -616,29 +622,79 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
-function generateReport(
+async function generateDependencyTree(): Promise<string[]> {
+  const lines: string[] = [];
+  
+  // Get the go.mod file content
+  const goModUri = await GoModParser.findGoModFile();
+  if (!goModUri) {
+    lines.push("No go.mod file found");
+    return lines;
+  }
+
+  const document = await vscode.workspace.openTextDocument(goModUri);
+  const content = document.getText();
+  const fileLines = content.split('\n');
+
+  // Parse the go.mod file directly
+  const dependencies: { path: string; version: string; indirect: boolean }[] = [];
+  let inRequireBlock = false;
+
+  for (const line of fileLines) {
+    const trimmedLine = line.trim();
+    
+    if (trimmedLine === 'require (') {
+      inRequireBlock = true;
+      continue;
+    }
+    
+    if (trimmedLine === ')') {
+      inRequireBlock = false;
+      continue;
+    }
+
+    if (inRequireBlock) {
+      const match = trimmedLine.match(/^\s*([^\s]+)\s+([^\s]+)(?:\s+\/\/\s+indirect)?$/);
+      if (match) {
+        const [_, path, version] = match;
+        dependencies.push({
+          path,
+          version,
+          indirect: trimmedLine.includes('// indirect')
+        });
+      }
+    }
+  }
+
+  // Print the dependencies
+  lines.push("Dependencies:");
+  dependencies.forEach(dep => {
+    const indirect = dep.indirect ? " (indirect)" : "";
+    lines.push(`- ${dep.path}@${dep.version}${indirect}`);
+  });
+
+  return lines;
+}
+
+async function generateReport(
   modules: GoModule[],
   vulnerabilities: Map<string, Vulnerability[]>,
   dependencyTree: DependencyTree,
   usages: VulnerableUsage[]
-): { markdown: string; json: ScanReport } {
+): Promise<{ markdown: string; json: ScanReport }> {
   const parts: string[] = [];
   const scanId = generateHash(Date.now().toString());
-  const timestamp = new Date().toISOString();
 
   // Add header
-  parts.push("# Go Dependency Scan Report\n");
-  parts.push(`Generated: ${new Date().toLocaleString()}\n`);
+  parts.push("# Go Dependency Threat Scan Report\n");
+  parts.push(`Scan ID: ${scanId}\n`);
+  parts.push(`Timestamp: ${new Date().toISOString()}\n`);
 
   // Add dependency tree
   parts.push("## Dependency Tree\n");
   parts.push("```\n");
-  for (const [path, node] of dependencyTree) {
-    const indent = "  ".repeat(node.depth);
-    const version = node.module.version;
-    const indirect = node.module.indirect ? " (indirect)" : "";
-    parts.push(`${indent}${path}@${version}${indirect}`);
-  }
+  const treeLines = await generateDependencyTree();
+  parts.push(...treeLines);
   parts.push("```\n");
 
   // Add vulnerability summary
@@ -745,15 +801,19 @@ function generateReport(
       lowVulnerabilities: lowVulns,
       totalUsages: usages.length,
     },
-    dependencyTree: Array.from(dependencyTree.entries()).map(
-      ([path, node]) => ({
-        id: generateHash(`${path}@${node.module.version}`),
-        path,
-        version: node.module.version,
-        indirect: node.module.indirect,
-        depth: node.depth,
-      })
-    ),
+    dependencyTree: Array.from(dependencyTree.entries()).map(([path, node]) => ({
+      id: generateHash(`${path}@${node.module.version}`),
+      path,
+      version: node.module.version,
+      indirect: node.module.indirect,
+      depth: node.depth,
+      dependencies: node.dependencies.map(dep => ({
+        id: generateHash(`${dep.path}@${dep.version}`),
+        path: dep.path,
+        version: dep.version,
+        indirect: dep.indirect
+      }))
+    })),
     vulnerabilities: [],
   };
 
