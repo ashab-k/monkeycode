@@ -13,20 +13,40 @@ export class SeverityAnalyzer {
       rawSeverity: vuln.severity,
       databaseSeverity: vuln.database_specific?.severity,
       ecosystemSeverity: vuln.ecosystem_specific?.severity,
-      cvss: vuln.database_specific?.cvss
+      cvss: vuln.database_specific?.cvss,
+      summary: vuln.summary,
+      details: vuln.details
     });
 
     // Try each severity source in order of reliability
-    severity = this.tryDatabaseSpecificSeverity(vuln, severityDetails) ||
-              this.tryEcosystemSpecificSeverity(vuln, severityDetails) ||
-              this.tryPrimarySeverity(vuln, severityDetails) ||
-              this.tryCVSSScore(vuln, severityDetails) ||
-              this.inferSeverityFromId(vuln, severityDetails);
+    const dbSeverity = this.tryDatabaseSpecificSeverity(vuln, severityDetails);
+    console.log('Database severity result:', dbSeverity);
+    
+    const ecoSeverity = this.tryEcosystemSpecificSeverity(vuln, severityDetails);
+    console.log('Ecosystem severity result:', ecoSeverity);
+    
+    const primarySeverity = this.tryPrimarySeverity(vuln, severityDetails);
+    console.log('Primary severity result:', primarySeverity);
+    
+    const cvssSeverity = this.tryCVSSScore(vuln, severityDetails);
+    console.log('CVSS severity result:', cvssSeverity);
+    
+    const inferredSeverity = this.inferSeverityFromId(vuln, severityDetails);
+    console.log('Inferred severity result:', inferredSeverity);
+
+    severity = dbSeverity || ecoSeverity || primarySeverity || cvssSeverity || inferredSeverity;
 
     console.log('Final severity determination:', {
       id: vuln.id,
       severity,
-      details: severityDetails
+      details: severityDetails,
+      sources: {
+        database: dbSeverity,
+        ecosystem: ecoSeverity,
+        primary: primarySeverity,
+        cvss: cvssSeverity,
+        inferred: inferredSeverity
+      }
     });
 
     return {

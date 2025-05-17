@@ -6,13 +6,13 @@ export interface GoModule {
 
 export interface Vulnerability {
     id: string;
+    severity: 'low' | 'medium' | 'high' | 'critical' | 'unknown';
     summary: string;
     details: string;
-    aliases: string[];
-    severity: 'low' | 'medium' | 'high' | 'critical' | 'unknown';
     published: Date;
     modified: Date;
-    affectedVersions: any[]; // TODO: Type this more specifically
+    aliases: string[];
+    affectedVersions?: string[]; // Make this optional since we don't always have it
 }
 
 export interface OSVVulnerability {

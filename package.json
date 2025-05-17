@@ -26,7 +26,25 @@
     "commands": [
       {
         "command": "monkeycode.scanDependencies",
-        "title": "Scan Go Dependencies for Vulnerabilities"
+        "title": "Scan Dependencies"
+      },
+      {
+        "command": "monkeycode.showVulnerableCode",
+        "title": "Show Vulnerable Code"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "monkeycode.scanDependencies",
+        "key": "ctrl+shift+s",
+        "mac": "cmd+shift+s",
+        "when": "editorLangId == go"
+      },
+      {
+        "command": "monkeycode.showVulnerableCode",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v",
+        "when": "editorLangId == go"
       }
     ],
     "configuration": {
